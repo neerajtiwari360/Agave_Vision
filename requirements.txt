@@ -1,4 +1,3 @@
+flask
 opencv-python
-mediapipe
-deep-sort-realtime
-numpy
+requests
