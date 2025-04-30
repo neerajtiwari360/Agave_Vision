@@ -1,10 +1,9 @@
 from flask import Flask, render_template_string, request, redirect
 from sqlalchemy import create_engine, text
+from sqlalchemy.pool import QueuePool
 import pandas as pd
 import uuid
-from datetime import datetime
-from sqlalchemy.pool import QueuePool
-
+from datetime import datetime, date
 
 app = Flask(__name__)
 app.secret_key = 'your_secret_key'
@@ -16,15 +15,14 @@ password = 'agave'
 port = '5433'
 database = 'agave'
 connection_url = f"postgresql+psycopg2://{user}:{password}@{host_ip}:{port}/{database}"
-#engine = create_engine(connection_url)
 engine = create_engine(
     connection_url,
-    pool_pre_ping=True,      # ✅ checks if connection is alive before using it
-    pool_recycle=1800,       # ✅ recycle connections every 30 mins (optional but recommended)
+    pool_pre_ping=True,
+    pool_recycle=1800,
     poolclass=QueuePool
 )
 
-# HTML template
+# HTML Template with added fields
 template = """
 <!DOCTYPE html>
 <html lang="en">
@@ -33,9 +31,7 @@ template = """
     <title>Admin Access Control</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <style>
-        * {
-            box-sizing: border-box;
-        }
+        * { box-sizing: border-box; }
         body {
             font-family: "Segoe UI", Arial, sans-serif;
             background-color: #f7f9fc;
@@ -43,25 +39,10 @@ template = """
             margin: 0;
             color: #333;
         }
-        h1 {
-            margin-bottom: 10px;
-            color: #2c3e50;
-        }
-        h2 {
-            margin-top: 30px;
-            color: #34495e;
-        }
-        form {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 15px;
-            margin-bottom: 20px;
-        }
-        label {
-            min-width: 100px;
-            align-self: center;
-        }
-        select, button {
+        h1, h2 { color: #2c3e50; }
+        form { display: flex; flex-wrap: wrap; gap: 15px; margin-bottom: 20px; }
+        label { min-width: 120px; align-self: center; }
+        select, input, button {
             padding: 8px 12px;
             border-radius: 4px;
             border: 1px solid #ccc;
@@ -72,11 +53,8 @@ template = """
             color: white;
             border: none;
             cursor: pointer;
-            transition: background-color 0.2s;
         }
-        button:hover {
-            background-color: #27ae60;
-        }
+        button:hover { background-color: #27ae60; }
         table {
             width: 100%;
             border-collapse: collapse;
@@ -89,12 +67,7 @@ template = """
             border: 1px solid #ddd;
             text-align: left;
         }
-        th {
-            background-color: #f1f1f1;
-        }
-        .action-form {
-            margin: 0;
-        }
+        th { background-color: #f1f1f1; }
         .action-form button {
             background-color: #e74c3c;
         }
@@ -102,12 +75,8 @@ template = """
             background-color: #c0392b;
         }
         @media (max-width: 600px) {
-            form {
-                flex-direction: column;
-            }
-            label {
-                margin-bottom: 5px;
-            }
+            form { flex-direction: column; }
+            label { margin-bottom: 5px; }
         }
     </style>
 </head>
@@ -130,20 +99,35 @@ template = """
             {% endfor %}
         </select>
 
+        <label for="expiry_date">Access Expiry:</label>
+        <input type="date" name="expiry_date" id="expiry_date" min="{{ current_date }}">
+
+        <label for="payment_status">Payment:</label>
+        <select name="payment_status" id="payment_status">
+            <option value="unpaid">Unpaid</option>
+            <option value="pending">Pending</option>
+            <option value="paid">Paid</option>
+            <option value="failed">Failed</option>
+        </select>
+
+        <label for="request_reason">Reason:</label>
+        <select name="request_reason" id="request_reason">
+            <option value="testing">Testing</option>
+            <option value="trial">Trial</option>
+            <option value="production">Production</option>
+            <option value="free">Free</option>
+        </select>
+
         <button type="submit">Grant Access</button>
     </form>
 
     <h2>Current Access Grants</h2>
     <table>
         <thead>
-            <tr>
-                <th>Seller</th>
-                <th>Buyer</th>
-                <th>Action</th>
-            </tr>
+            <tr><th>Seller</th><th>Buyer</th><th>Action</th></tr>
         </thead>
         <tbody>
-        {% for access in access_list %}
+            {% for access in access_list %}
             <tr>
                 <td>{{ access['seller_name'] }}</td>
                 <td>{{ access['buyer_name'] }}</td>
@@ -155,15 +139,14 @@ template = """
                     </form>
                 </td>
             </tr>
-        {% endfor %}
+            {% endfor %}
         </tbody>
     </table>
 </body>
 </html>
 """
 
-
-# Helper Functions
+# Helper functions
 
 def get_sellers_and_buyers():
     query = "SELECT id, registration_name, account_type FROM company"
@@ -187,11 +170,11 @@ def get_granted_accesses():
     """
     return pd.read_sql(query, engine).to_dict('records')
 
-def log_access_change(seller_id, buyer_id, status):
+def log_access_change(seller_id, buyer_id, status, expiry_date=None, payment_status='unpaid', request_reason=None):
     now = datetime.utcnow()
+    expiry_ts = datetime.strptime(expiry_date, "%Y-%m-%d") if expiry_date else None
 
     with engine.begin() as conn:
-        # Check if an entry exists regardless of status
         existing = conn.execute(text("""
             SELECT id, status FROM company_access_control
             WHERE seller_company_id = :seller_id AND buyer_company_id = :buyer_id
@@ -201,32 +184,43 @@ def log_access_change(seller_id, buyer_id, status):
 
         if status == 'approved':
             if existing:
-                # If status is not approved, update it
                 if existing[1] != 'approved':
                     conn.execute(text("""
                         UPDATE company_access_control
                         SET status = 'approved',
                             update_time = :now,
                             delete_time = NULL,
+                            access_expiry_date = :expiry,
+                            payment_status = :payment_status,
+                            request_reason = :request_reason,
                             updater = 'admin'
                         WHERE id = :id
-                    """), {"id": existing[0], "now": now})
-                # Else do nothing (already approved)
+                    """), {
+                        "id": existing[0],
+                        "now": now,
+                        "expiry": expiry_ts,
+                        "payment_status": payment_status,
+                        "request_reason": request_reason
+                    })
             else:
-                # No row exists, safe to insert
                 conn.execute(text("""
                     INSERT INTO company_access_control (
                         id, buyer_company_id, seller_company_id, requested_by_user_id, status,
+                        access_expiry_date, payment_status, request_reason,
                         create_time, update_time, creator, updater
                     ) VALUES (
                         :id, :buyer_id, :seller_id, :requested_by, 'approved',
+                        :expiry, :payment_status, :request_reason,
                         :now, :now, 'admin', 'admin'
                     )
                 """), {
                     "id": str(uuid.uuid4()),
                     "buyer_id": buyer_id,
                     "seller_id": seller_id,
-                    "requested_by": "00000000-0000-0000-0000-000000000000",  # placeholder
+                    "requested_by": "00000000-0000-0000-0000-000000000000",
+                    "expiry": expiry_ts,
+                    "payment_status": payment_status,
+                    "request_reason": request_reason,
                     "now": now
                 })
 
@@ -239,7 +233,6 @@ def log_access_change(seller_id, buyer_id, status):
                     updater = 'admin'
                 WHERE id = :id
             """), {"id": existing[0], "now": now})
-
 
 def copy_sellers_preds_to_buyer(buyer_id, seller_ids):
     with engine.begin() as conn:
@@ -273,13 +266,17 @@ def index():
             'seller_name': get_company_name(access['seller_id']),
             'buyer_name': get_company_name(access['buyer_id']),
         })
-    return render_template_string(template, sellers=sellers, buyers=buyers, access_list=access_list)
+    return render_template_string(template, sellers=sellers, buyers=buyers, access_list=access_list, current_date=date.today().isoformat())
 
 @app.route('/grant', methods=['POST'])
 def grant_access():
     seller_id = request.form['seller_id']
     buyer_id = request.form['buyer_id']
-    log_access_change(seller_id, buyer_id, 'approved')
+    expiry_date = request.form.get('expiry_date')
+    payment_status = request.form.get('payment_status', 'unpaid')
+    request_reason = request.form.get('request_reason', None)
+
+    log_access_change(seller_id, buyer_id, 'approved', expiry_date, payment_status, request_reason)
 
     all_seller_ids = [
         a['seller_id'] for a in get_granted_accesses()
@@ -303,6 +300,602 @@ def revoke_access():
 
 if __name__ == '__main__':
     app.run(host="0.0.0.0", port=5000, debug=True)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# from flask import Flask, render_template_string, request, redirect
+# from sqlalchemy import create_engine, text
+# from sqlalchemy.pool import QueuePool
+# import pandas as pd
+# import uuid
+# from datetime import datetime
+
+# app = Flask(__name__)
+# app.secret_key = 'your_secret_key'
+
+# # DB connection
+# host_ip = "172.187.200.129"
+# user = 'agave'
+# password = 'agave'
+# port = '5433'
+# database = 'agave'
+# connection_url = f"postgresql+psycopg2://{user}:{password}@{host_ip}:{port}/{database}"
+# engine = create_engine(
+#     connection_url,
+#     pool_pre_ping=True,
+#     pool_recycle=1800,
+#     poolclass=QueuePool
+# )
+
+# # HTML template with expiry date and payment status
+# template = """
+# <!DOCTYPE html>
+# <html lang="en">
+# <head>
+#     <meta charset="UTF-8">
+#     <title>Admin Access Control</title>
+#     <meta name="viewport" content="width=device-width, initial-scale=1">
+#     <style>
+#         * { box-sizing: border-box; }
+#         body { font-family: "Segoe UI", Arial, sans-serif; background-color: #f7f9fc; padding: 30px; margin: 0; color: #333; }
+#         h1, h2 { color: #2c3e50; }
+#         form { display: flex; flex-wrap: wrap; gap: 15px; margin-bottom: 20px; }
+#         label { min-width: 100px; align-self: center; }
+#         select, input, button {
+#             padding: 8px 12px;
+#             border-radius: 4px;
+#             border: 1px solid #ccc;
+#             font-size: 14px;
+#         }
+#         button {
+#             background-color: #2ecc71;
+#             color: white;
+#             border: none;
+#             cursor: pointer;
+#         }
+#         button:hover { background-color: #27ae60; }
+#         table {
+#             width: 100%; border-collapse: collapse; background-color: white;
+#             box-shadow: 0 2px 4px rgba(0,0,0,0.05); margin-top: 10px;
+#         }
+#         th, td { padding: 12px 16px; border: 1px solid #ddd; text-align: left; }
+#         th { background-color: #f1f1f1; }
+#         .action-form button { background-color: #e74c3c; }
+#         .action-form button:hover { background-color: #c0392b; }
+#         @media (max-width: 600px) {
+#             form { flex-direction: column; }
+#             label { margin-bottom: 5px; }
+#         }
+#     </style>
+# </head>
+# <body>
+#     <h1>Admin: Manage Access to <code>pred</code> Table</h1>
+
+#     <h2>Grant Access</h2>
+#     <form method="POST" action="/grant">
+#         <label for="seller_id">Seller:</label>
+#         <select name="seller_id" id="seller_id" required>
+#             {% for seller in sellers %}
+#                 <option value="{{ seller['id'] }}">{{ seller['registration_name'] }} ({{ seller['id'] }})</option>
+#             {% endfor %}
+#         </select>
+
+#         <label for="buyer_id">Buyer:</label>
+#         <select name="buyer_id" id="buyer_id" required>
+#             {% for buyer in buyers %}
+#                 <option value="{{ buyer['id'] }}">{{ buyer['registration_name'] }} ({{ buyer['id'] }})</option>
+#             {% endfor %}
+#         </select>
+
+#         <label for="expiry_date">Access Expiry:</label>
+#         <input type="date" name="expiry_date" id="expiry_date">
+
+#         <label for="payment_status">Payment:</label>
+#         <select name="payment_status" id="payment_status">
+#             <option value="unpaid">Unpaid</option>
+#             <option value="pending">Pending</option>
+#             <option value="paid">Paid</option>
+#             <option value="failed">Failed</option>
+#         </select>
+
+#         <button type="submit">Grant Access</button>
+#     </form>
+
+#     <h2>Current Access Grants</h2>
+#     <table>
+#         <thead>
+#             <tr><th>Seller</th><th>Buyer</th><th>Action</th></tr>
+#         </thead>
+#         <tbody>
+#             {% for access in access_list %}
+#             <tr>
+#                 <td>{{ access['seller_name'] }}</td>
+#                 <td>{{ access['buyer_name'] }}</td>
+#                 <td>
+#                     <form class="action-form" method="POST" action="/revoke">
+#                         <input type="hidden" name="seller_id" value="{{ access['seller_id'] }}">
+#                         <input type="hidden" name="buyer_id" value="{{ access['buyer_id'] }}">
+#                         <button type="submit">Revoke</button>
+#                     </form>
+#                 </td>
+#             </tr>
+#             {% endfor %}
+#         </tbody>
+#     </table>
+# </body>
+# </html>
+# """
+
+# # Helper Functions
+
+# def get_sellers_and_buyers():
+#     query = "SELECT id, registration_name, account_type FROM company"
+#     companies = pd.read_sql(query, engine)
+#     companies['account_type'] = companies['account_type'].str.lower()
+#     sellers = companies[companies['account_type'] == 'seller'].to_dict('records')
+#     buyers = companies[companies['account_type'] == 'buyer'].to_dict('records')
+#     return sellers, buyers
+
+# def get_company_name(company_id):
+#     query = "SELECT registration_name FROM company WHERE id = :company_id"
+#     with engine.connect() as conn:
+#         result = conn.execute(text(query), {"company_id": company_id}).fetchone()
+#     return result[0] if result else "Unknown"
+
+# def get_granted_accesses():
+#     query = """
+#         SELECT buyer_company_id AS buyer_id, seller_company_id AS seller_id
+#         FROM company_access_control
+#         WHERE status = 'approved' AND delete_time IS NULL
+#     """
+#     return pd.read_sql(query, engine).to_dict('records')
+
+# def log_access_change(seller_id, buyer_id, status, expiry_date=None, payment_status='unpaid'):
+#     now = datetime.utcnow()
+#     expiry_ts = datetime.strptime(expiry_date, "%Y-%m-%d") if expiry_date else None
+
+#     with engine.begin() as conn:
+#         existing = conn.execute(text("""
+#             SELECT id, status FROM company_access_control
+#             WHERE seller_company_id = :seller_id AND buyer_company_id = :buyer_id
+#             ORDER BY create_time DESC
+#             LIMIT 1
+#         """), {"seller_id": seller_id, "buyer_id": buyer_id}).fetchone()
+
+#         if status == 'approved':
+#             if existing:
+#                 if existing[1] != 'approved':
+#                     conn.execute(text("""
+#                         UPDATE company_access_control
+#                         SET status = 'approved',
+#                             update_time = :now,
+#                             delete_time = NULL,
+#                             access_expiry_date = :expiry,
+#                             payment_status = :payment_status,
+#                             updater = 'admin'
+#                         WHERE id = :id
+#                     """), {"id": existing[0], "now": now, "expiry": expiry_ts, "payment_status": payment_status})
+#             else:
+#                 conn.execute(text("""
+#                     INSERT INTO company_access_control (
+#                         id, buyer_company_id, seller_company_id, requested_by_user_id, status,
+#                         access_expiry_date, payment_status,
+#                         create_time, update_time, creator, updater
+#                     ) VALUES (
+#                         :id, :buyer_id, :seller_id, :requested_by, 'approved',
+#                         :expiry, :payment_status,
+#                         :now, :now, 'admin', 'admin'
+#                     )
+#                 """), {
+#                     "id": str(uuid.uuid4()),
+#                     "buyer_id": buyer_id,
+#                     "seller_id": seller_id,
+#                     "requested_by": "00000000-0000-0000-0000-000000000000",
+#                     "expiry": expiry_ts,
+#                     "payment_status": payment_status,
+#                     "now": now
+#                 })
+
+#         elif status == 'revoked' and existing:
+#             conn.execute(text("""
+#                 UPDATE company_access_control
+#                 SET status = 'revoked',
+#                     update_time = :now,
+#                     delete_time = :now,
+#                     updater = 'admin'
+#                 WHERE id = :id
+#             """), {"id": existing[0], "now": now})
+
+# def copy_sellers_preds_to_buyer(buyer_id, seller_ids):
+#     with engine.begin() as conn:
+#         conn.execute(text("DELETE FROM pred WHERE company_id = :buyer_id"), {"buyer_id": buyer_id})
+#         for seller_id in seller_ids:
+#             seller_preds = pd.read_sql(
+#                 text("SELECT * FROM pred WHERE company_id = :seller_id"),
+#                 conn,
+#                 params={"seller_id": seller_id}
+#             )
+#             if not seller_preds.empty:
+#                 seller_preds['company_id'] = buyer_id
+#                 if 'id' in seller_preds.columns:
+#                     seller_preds['id'] = [str(uuid.uuid4()) for _ in range(len(seller_preds))]
+#                 if 'container_id' in seller_preds.columns:
+#                     suffix = seller_id[:8]
+#                     seller_preds['container_id'] = seller_preds['container_id'].astype(str) + f"_{suffix}"
+#                 seller_preds.to_sql('pred', con=conn, if_exists='append', index=False)
+
+# # Routes
+
+# @app.route('/')
+# def index():
+#     sellers, buyers = get_sellers_and_buyers()
+#     accesses = get_granted_accesses()
+#     access_list = []
+#     for access in accesses:
+#         access_list.append({
+#             'seller_id': access['seller_id'],
+#             'buyer_id': access['buyer_id'],
+#             'seller_name': get_company_name(access['seller_id']),
+#             'buyer_name': get_company_name(access['buyer_id']),
+#         })
+#     return render_template_string(template, sellers=sellers, buyers=buyers, access_list=access_list)
+
+# @app.route('/grant', methods=['POST'])
+# def grant_access():
+#     seller_id = request.form['seller_id']
+#     buyer_id = request.form['buyer_id']
+#     expiry_date = request.form.get('expiry_date')
+#     payment_status = request.form.get('payment_status', 'unpaid')
+
+#     log_access_change(seller_id, buyer_id, 'approved', expiry_date, payment_status)
+
+#     all_seller_ids = [
+#         a['seller_id'] for a in get_granted_accesses()
+#         if a['buyer_id'] == buyer_id
+#     ]
+#     copy_sellers_preds_to_buyer(buyer_id, all_seller_ids)
+#     return redirect('/')
+
+# @app.route('/revoke', methods=['POST'])
+# def revoke_access():
+#     seller_id = request.form['seller_id']
+#     buyer_id = request.form['buyer_id']
+#     log_access_change(seller_id, buyer_id, 'revoked')
+
+#     remaining_seller_ids = [
+#         a['seller_id'] for a in get_granted_accesses()
+#         if a['buyer_id'] == buyer_id
+#     ]
+#     copy_sellers_preds_to_buyer(buyer_id, remaining_seller_ids)
+#     return redirect('/')
+
+# if __name__ == '__main__':
+#     app.run(host="0.0.0.0", port=5000, debug=True)
+
+
+
+
+
+
+
+
+
+# from flask import Flask, render_template_string, request, redirect
+# from sqlalchemy import create_engine, text
+# import pandas as pd
+# import uuid
+# from datetime import datetime
+# from sqlalchemy.pool import QueuePool
+
+
+# app = Flask(__name__)
+# app.secret_key = 'your_secret_key'
+
+# # Database connection
+# host_ip = "172.187.200.129"
+# user = 'agave'
+# password = 'agave'
+# port = '5433'
+# database = 'agave'
+# connection_url = f"postgresql+psycopg2://{user}:{password}@{host_ip}:{port}/{database}"
+# #engine = create_engine(connection_url)
+# engine = create_engine(
+#     connection_url,
+#     pool_pre_ping=True,      # ✅ checks if connection is alive before using it
+#     pool_recycle=1800,       # ✅ recycle connections every 30 mins (optional but recommended)
+#     poolclass=QueuePool
+# )
+
+# # HTML template
+# template = """
+# <!DOCTYPE html>
+# <html lang="en">
+# <head>
+#     <meta charset="UTF-8">
+#     <title>Admin Access Control</title>
+#     <meta name="viewport" content="width=device-width, initial-scale=1">
+#     <style>
+#         * {
+#             box-sizing: border-box;
+#         }
+#         body {
+#             font-family: "Segoe UI", Arial, sans-serif;
+#             background-color: #f7f9fc;
+#             padding: 30px;
+#             margin: 0;
+#             color: #333;
+#         }
+#         h1 {
+#             margin-bottom: 10px;
+#             color: #2c3e50;
+#         }
+#         h2 {
+#             margin-top: 30px;
+#             color: #34495e;
+#         }
+#         form {
+#             display: flex;
+#             flex-wrap: wrap;
+#             gap: 15px;
+#             margin-bottom: 20px;
+#         }
+#         label {
+#             min-width: 100px;
+#             align-self: center;
+#         }
+#         select, button {
+#             padding: 8px 12px;
+#             border-radius: 4px;
+#             border: 1px solid #ccc;
+#             font-size: 14px;
+#         }
+#         button {
+#             background-color: #2ecc71;
+#             color: white;
+#             border: none;
+#             cursor: pointer;
+#             transition: background-color 0.2s;
+#         }
+#         button:hover {
+#             background-color: #27ae60;
+#         }
+#         table {
+#             width: 100%;
+#             border-collapse: collapse;
+#             background-color: white;
+#             box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+#             margin-top: 10px;
+#         }
+#         th, td {
+#             padding: 12px 16px;
+#             border: 1px solid #ddd;
+#             text-align: left;
+#         }
+#         th {
+#             background-color: #f1f1f1;
+#         }
+#         .action-form {
+#             margin: 0;
+#         }
+#         .action-form button {
+#             background-color: #e74c3c;
+#         }
+#         .action-form button:hover {
+#             background-color: #c0392b;
+#         }
+#         @media (max-width: 600px) {
+#             form {
+#                 flex-direction: column;
+#             }
+#             label {
+#                 margin-bottom: 5px;
+#             }
+#         }
+#     </style>
+# </head>
+# <body>
+#     <h1>Admin: Manage Access to <code>pred</code> Table</h1>
+
+#     <h2>Grant Access</h2>
+#     <form method="POST" action="/grant">
+#         <label for="seller_id">Seller:</label>
+#         <select name="seller_id" id="seller_id" required>
+#             {% for seller in sellers %}
+#                 <option value="{{ seller['id'] }}">{{ seller['registration_name'] }} ({{ seller['id'] }})</option>
+#             {% endfor %}
+#         </select>
+
+#         <label for="buyer_id">Buyer:</label>
+#         <select name="buyer_id" id="buyer_id" required>
+#             {% for buyer in buyers %}
+#                 <option value="{{ buyer['id'] }}">{{ buyer['registration_name'] }} ({{ buyer['id'] }})</option>
+#             {% endfor %}
+#         </select>
+
+#         <button type="submit">Grant Access</button>
+#     </form>
+
+#     <h2>Current Access Grants</h2>
+#     <table>
+#         <thead>
+#             <tr>
+#                 <th>Seller</th>
+#                 <th>Buyer</th>
+#                 <th>Action</th>
+#             </tr>
+#         </thead>
+#         <tbody>
+#         {% for access in access_list %}
+#             <tr>
+#                 <td>{{ access['seller_name'] }}</td>
+#                 <td>{{ access['buyer_name'] }}</td>
+#                 <td>
+#                     <form class="action-form" method="POST" action="/revoke">
+#                         <input type="hidden" name="seller_id" value="{{ access['seller_id'] }}">
+#                         <input type="hidden" name="buyer_id" value="{{ access['buyer_id'] }}">
+#                         <button type="submit">Revoke</button>
+#                     </form>
+#                 </td>
+#             </tr>
+#         {% endfor %}
+#         </tbody>
+#     </table>
+# </body>
+# </html>
+# """
+
+
+# # Helper Functions
+
+# def get_sellers_and_buyers():
+#     query = "SELECT id, registration_name, account_type FROM company"
+#     companies = pd.read_sql(query, engine)
+#     companies['account_type'] = companies['account_type'].str.lower()
+#     sellers = companies[companies['account_type'] == 'seller'].to_dict('records')
+#     buyers = companies[companies['account_type'] == 'buyer'].to_dict('records')
+#     return sellers, buyers
+
+# def get_company_name(company_id):
+#     query = "SELECT registration_name FROM company WHERE id = :company_id"
+#     with engine.connect() as conn:
+#         result = conn.execute(text(query), {"company_id": company_id}).fetchone()
+#     return result[0] if result else "Unknown"
+
+# def get_granted_accesses():
+#     query = """
+#         SELECT buyer_company_id AS buyer_id, seller_company_id AS seller_id
+#         FROM company_access_control
+#         WHERE status = 'approved' AND delete_time IS NULL
+#     """
+#     return pd.read_sql(query, engine).to_dict('records')
+
+# def log_access_change(seller_id, buyer_id, status):
+#     now = datetime.utcnow()
+
+#     with engine.begin() as conn:
+#         # Check if an entry exists regardless of status
+#         existing = conn.execute(text("""
+#             SELECT id, status FROM company_access_control
+#             WHERE seller_company_id = :seller_id AND buyer_company_id = :buyer_id
+#             ORDER BY create_time DESC
+#             LIMIT 1
+#         """), {"seller_id": seller_id, "buyer_id": buyer_id}).fetchone()
+
+#         if status == 'approved':
+#             if existing:
+#                 # If status is not approved, update it
+#                 if existing[1] != 'approved':
+#                     conn.execute(text("""
+#                         UPDATE company_access_control
+#                         SET status = 'approved',
+#                             update_time = :now,
+#                             delete_time = NULL,
+#                             updater = 'admin'
+#                         WHERE id = :id
+#                     """), {"id": existing[0], "now": now})
+#                 # Else do nothing (already approved)
+#             else:
+#                 # No row exists, safe to insert
+#                 conn.execute(text("""
+#                     INSERT INTO company_access_control (
+#                         id, buyer_company_id, seller_company_id, requested_by_user_id, status,
+#                         create_time, update_time, creator, updater
+#                     ) VALUES (
+#                         :id, :buyer_id, :seller_id, :requested_by, 'approved',
+#                         :now, :now, 'admin', 'admin'
+#                     )
+#                 """), {
+#                     "id": str(uuid.uuid4()),
+#                     "buyer_id": buyer_id,
+#                     "seller_id": seller_id,
+#                     "requested_by": "00000000-0000-0000-0000-000000000000",  # placeholder
+#                     "now": now
+#                 })
+
+#         elif status == 'revoked' and existing:
+#             conn.execute(text("""
+#                 UPDATE company_access_control
+#                 SET status = 'revoked',
+#                     update_time = :now,
+#                     delete_time = :now,
+#                     updater = 'admin'
+#                 WHERE id = :id
+#             """), {"id": existing[0], "now": now})
+
+
+# def copy_sellers_preds_to_buyer(buyer_id, seller_ids):
+#     with engine.begin() as conn:
+#         conn.execute(text("DELETE FROM pred WHERE company_id = :buyer_id"), {"buyer_id": buyer_id})
+#         for seller_id in seller_ids:
+#             seller_preds = pd.read_sql(
+#                 text("SELECT * FROM pred WHERE company_id = :seller_id"),
+#                 conn,
+#                 params={"seller_id": seller_id}
+#             )
+#             if not seller_preds.empty:
+#                 seller_preds['company_id'] = buyer_id
+#                 if 'id' in seller_preds.columns:
+#                     seller_preds['id'] = [str(uuid.uuid4()) for _ in range(len(seller_preds))]
+#                 if 'container_id' in seller_preds.columns:
+#                     suffix = seller_id[:8]
+#                     seller_preds['container_id'] = seller_preds['container_id'].astype(str) + f"_{suffix}"
+#                 seller_preds.to_sql('pred', con=conn, if_exists='append', index=False)
+
+# # Routes
+
+# @app.route('/')
+# def index():
+#     sellers, buyers = get_sellers_and_buyers()
+#     accesses = get_granted_accesses()
+#     access_list = []
+#     for access in accesses:
+#         access_list.append({
+#             'seller_id': access['seller_id'],
+#             'buyer_id': access['buyer_id'],
+#             'seller_name': get_company_name(access['seller_id']),
+#             'buyer_name': get_company_name(access['buyer_id']),
+#         })
+#     return render_template_string(template, sellers=sellers, buyers=buyers, access_list=access_list)
+
+# @app.route('/grant', methods=['POST'])
+# def grant_access():
+#     seller_id = request.form['seller_id']
+#     buyer_id = request.form['buyer_id']
+#     log_access_change(seller_id, buyer_id, 'approved')
+
+#     all_seller_ids = [
+#         a['seller_id'] for a in get_granted_accesses()
+#         if a['buyer_id'] == buyer_id
+#     ]
+#     copy_sellers_preds_to_buyer(buyer_id, all_seller_ids)
+#     return redirect('/')
+
+# @app.route('/revoke', methods=['POST'])
+# def revoke_access():
+#     seller_id = request.form['seller_id']
+#     buyer_id = request.form['buyer_id']
+#     log_access_change(seller_id, buyer_id, 'revoked')
+
+#     remaining_seller_ids = [
+#         a['seller_id'] for a in get_granted_accesses()
+#         if a['buyer_id'] == buyer_id
+#     ]
+#     copy_sellers_preds_to_buyer(buyer_id, remaining_seller_ids)
+#     return redirect('/')
+
+# if __name__ == '__main__':
+#     app.run(host="0.0.0.0", port=5000, debug=True)
 
 
 
