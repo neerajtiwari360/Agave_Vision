@@ -23,6 +23,7 @@ engine = create_engine(
 )
 
 # HTML Template with added fields
+
 template = """
 <!DOCTYPE html>
 <html lang="en">
@@ -30,101 +31,81 @@ template = """
     <meta charset="UTF-8">
     <title>Admin Access Control</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <style>
-        * { box-sizing: border-box; }
-        body {
-            font-family: "Segoe UI", Arial, sans-serif;
-            background-color: #f7f9fc;
-            padding: 30px;
-            margin: 0;
-            color: #333;
-        }
-        h1, h2 { color: #2c3e50; }
-        form { display: flex; flex-wrap: wrap; gap: 15px; margin-bottom: 20px; }
-        label { min-width: 120px; align-self: center; }
-        select, input, button {
-            padding: 8px 12px;
-            border-radius: 4px;
-            border: 1px solid #ccc;
-            font-size: 14px;
-        }
-        button {
-            background-color: #2ecc71;
-            color: white;
-            border: none;
-            cursor: pointer;
-        }
-        button:hover { background-color: #27ae60; }
-        table {
-            width: 100%;
-            border-collapse: collapse;
-            background-color: white;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
-            margin-top: 10px;
-        }
-        th, td {
-            padding: 12px 16px;
-            border: 1px solid #ddd;
-            text-align: left;
-        }
-        th { background-color: #f1f1f1; }
-        .action-form button {
-            background-color: #e74c3c;
-        }
-        .action-form button:hover {
-            background-color: #c0392b;
-        }
-        @media (max-width: 600px) {
-            form { flex-direction: column; }
-            label { margin-bottom: 5px; }
-        }
-    </style>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
 </head>
-<body>
-    <h1>Admin: Manage Access to <code>pred</code> Table</h1>
+<body class="bg-light">
 
-    <h2>Grant Access</h2>
-    <form method="POST" action="/grant">
-        <label for="seller_id">Seller:</label>
-        <select name="seller_id" id="seller_id" required>
-            {% for seller in sellers %}
-                <option value="{{ seller['id'] }}">{{ seller['registration_name'] }} ({{ seller['id'] }})</option>
-            {% endfor %}
-        </select>
+<div class="container py-4">
+    <h1 class="mb-4">Admin: Manage Access</h1>
 
-        <label for="buyer_id">Buyer:</label>
-        <select name="buyer_id" id="buyer_id" required>
-            {% for buyer in buyers %}
-                <option value="{{ buyer['id'] }}">{{ buyer['registration_name'] }} ({{ buyer['id'] }})</option>
-            {% endfor %}
-        </select>
+    {% with messages = get_flashed_messages() %}
+      {% if messages %}
+        <div class="alert alert-info">{{ messages[0] }}</div>
+      {% endif %}
+    {% endwith %}
 
-        <label for="expiry_date">Access Expiry:</label>
-        <input type="date" name="expiry_date" id="expiry_date" min="{{ current_date }}">
+    <div class="card mb-4">
+        <div class="card-header">Grant Access</div>
+        <div class="card-body">
+            <form class="row g-3" method="POST" action="/grant">
+                <div class="col-md-6">
+                    <label for="seller_id" class="form-label">Seller</label>
+                    <select class="form-select" id="seller_id" name="seller_id" required>
+                        {% for seller in sellers %}
+                            <option value="{{ seller['id'] }}">{{ seller['registration_name'] }} ({{ seller['id'] }})</option>
+                        {% endfor %}
+                    </select>
+                </div>
 
-        <label for="payment_status">Payment:</label>
-        <select name="payment_status" id="payment_status">
-            <option value="unpaid">Unpaid</option>
-            <option value="pending">Pending</option>
-            <option value="paid">Paid</option>
-            <option value="failed">Failed</option>
-        </select>
+                <div class="col-md-6">
+                    <label for="buyer_id" class="form-label">Buyer</label>
+                    <select class="form-select" id="buyer_id" name="buyer_id" required>
+                        {% for buyer in buyers %}
+                            <option value="{{ buyer['id'] }}">{{ buyer['registration_name'] }} ({{ buyer['id'] }})</option>
+                        {% endfor %}
+                    </select>
+                </div>
 
-        <label for="request_reason">Reason:</label>
-        <select name="request_reason" id="request_reason">
-            <option value="testing">Testing</option>
-            <option value="trial">Trial</option>
-            <option value="production">Production</option>
-            <option value="free">Free</option>
-        </select>
+                <div class="col-md-4">
+                    <label for="expiry_date" class="form-label">Access Expiry</label>
+                    <input type="date" class="form-control" name="expiry_date" id="expiry_date" min="{{ current_date }}">
+                </div>
 
-        <button type="submit">Grant Access</button>
-    </form>
+                <div class="col-md-4">
+                    <label for="payment_status" class="form-label">Payment Status</label>
+                    <select class="form-select" name="payment_status" id="payment_status">
+                        <option value="unpaid">Unpaid</option>
+                        <option value="pending">Pending</option>
+                        <option value="paid">Paid</option>
+                        <option value="failed">Failed</option>
+                    </select>
+                </div>
 
-    <h2>Current Access Grants</h2>
-    <table>
+                <div class="col-md-4">
+                    <label for="request_reason" class="form-label">Request Reason</label>
+                    <select class="form-select" name="request_reason" id="request_reason">
+                        <option value="testing">Testing</option>
+                        <option value="trial">Trial</option>
+                        <option value="production">Production</option>
+                        <option value="free">Free</option>
+                    </select>
+                </div>
+
+                <div class="col-12">
+                    <button type="submit" class="btn btn-success">Grant Access</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <h2 class="mb-3">Current Access Grants</h2>
+    <table class="table table-bordered table-striped">
         <thead>
-            <tr><th>Seller</th><th>Buyer</th><th>Action</th></tr>
+            <tr>
+                <th>Seller</th>
+                <th>Buyer</th>
+                <th>Action</th>
+            </tr>
         </thead>
         <tbody>
             {% for access in access_list %}
@@ -132,19 +113,145 @@ template = """
                 <td>{{ access['seller_name'] }}</td>
                 <td>{{ access['buyer_name'] }}</td>
                 <td>
-                    <form class="action-form" method="POST" action="/revoke">
+                    <form method="POST" action="/revoke" onsubmit="return confirm('Are you sure you want to revoke this access?');">
                         <input type="hidden" name="seller_id" value="{{ access['seller_id'] }}">
                         <input type="hidden" name="buyer_id" value="{{ access['buyer_id'] }}">
-                        <button type="submit">Revoke</button>
+                        <button type="submit" class="btn btn-danger btn-sm">Revoke</button>
                     </form>
                 </td>
             </tr>
             {% endfor %}
         </tbody>
     </table>
+</div>
+
 </body>
 </html>
 """
+
+
+# template = """
+# <!DOCTYPE html>
+# <html lang="en">
+# <head>
+#     <meta charset="UTF-8">
+#     <title>Admin Access Control</title>
+#     <meta name="viewport" content="width=device-width, initial-scale=1">
+#     <style>
+#         * { box-sizing: border-box; }
+#         body {
+#             font-family: "Segoe UI", Arial, sans-serif;
+#             background-color: #f7f9fc;
+#             padding: 30px;
+#             margin: 0;
+#             color: #333;
+#         }
+#         h1, h2 { color: #2c3e50; }
+#         form { display: flex; flex-wrap: wrap; gap: 15px; margin-bottom: 20px; }
+#         label { min-width: 120px; align-self: center; }
+#         select, input, button {
+#             padding: 8px 12px;
+#             border-radius: 4px;
+#             border: 1px solid #ccc;
+#             font-size: 14px;
+#         }
+#         button {
+#             background-color: #2ecc71;
+#             color: white;
+#             border: none;
+#             cursor: pointer;
+#         }
+#         button:hover { background-color: #27ae60; }
+#         table {
+#             width: 100%;
+#             border-collapse: collapse;
+#             background-color: white;
+#             box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+#             margin-top: 10px;
+#         }
+#         th, td {
+#             padding: 12px 16px;
+#             border: 1px solid #ddd;
+#             text-align: left;
+#         }
+#         th { background-color: #f1f1f1; }
+#         .action-form button {
+#             background-color: #e74c3c;
+#         }
+#         .action-form button:hover {
+#             background-color: #c0392b;
+#         }
+#         @media (max-width: 600px) {
+#             form { flex-direction: column; }
+#             label { margin-bottom: 5px; }
+#         }
+#     </style>
+# </head>
+# <body>
+#     <h1>Admin: Manage Access to <code>pred</code> Table</h1>
+
+#     <h2>Grant Access</h2>
+#     <form method="POST" action="/grant">
+#         <label for="seller_id">Seller:</label>
+#         <select name="seller_id" id="seller_id" required>
+#             {% for seller in sellers %}
+#                 <option value="{{ seller['id'] }}">{{ seller['registration_name'] }} ({{ seller['id'] }})</option>
+#             {% endfor %}
+#         </select>
+
+#         <label for="buyer_id">Buyer:</label>
+#         <select name="buyer_id" id="buyer_id" required>
+#             {% for buyer in buyers %}
+#                 <option value="{{ buyer['id'] }}">{{ buyer['registration_name'] }} ({{ buyer['id'] }})</option>
+#             {% endfor %}
+#         </select>
+
+#         <label for="expiry_date">Access Expiry:</label>
+#         <input type="date" name="expiry_date" id="expiry_date" min="{{ current_date }}">
+
+#         <label for="payment_status">Payment:</label>
+#         <select name="payment_status" id="payment_status">
+#             <option value="unpaid">Unpaid</option>
+#             <option value="pending">Pending</option>
+#             <option value="paid">Paid</option>
+#             <option value="failed">Failed</option>
+#         </select>
+
+#         <label for="request_reason">Reason:</label>
+#         <select name="request_reason" id="request_reason">
+#             <option value="testing">Testing</option>
+#             <option value="trial">Trial</option>
+#             <option value="production">Production</option>
+#             <option value="free">Free</option>
+#         </select>
+
+#         <button type="submit">Grant Access</button>
+#     </form>
+
+#     <h2>Current Access Grants</h2>
+#     <table>
+#         <thead>
+#             <tr><th>Seller</th><th>Buyer</th><th>Action</th></tr>
+#         </thead>
+#         <tbody>
+#             {% for access in access_list %}
+#             <tr>
+#                 <td>{{ access['seller_name'] }}</td>
+#                 <td>{{ access['buyer_name'] }}</td>
+#                 <td>
+#                     <form class="action-form" method="POST" action="/revoke">
+#                         <input type="hidden" name="seller_id" value="{{ access['seller_id'] }}">
+#                         <input type="hidden" name="buyer_id" value="{{ access['buyer_id'] }}">
+#                         <button type="submit">Revoke</button>
+#                     </form>
+#                 </td>
+#             </tr>
+#             {% endfor %}
+#         </tbody>
+#     </table>
+# </body>
+# </html>
+# """
 
 # Helper functions
 
