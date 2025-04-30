@@ -27,31 +27,104 @@ engine = create_engine(
 # HTML template
 template = """
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
+    <meta charset="UTF-8">
     <title>Admin Access Control</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
     <style>
-        body { font-family: Arial; background-color: #f4f4f4; padding: 20px; color: #333; }
-        h1, h2 { color: #111; }
-        select, button { margin: 5px; padding: 5px; }
-        table { border-collapse: collapse; margin-top: 20px; }
-        th, td { border: 1px solid #888; padding: 8px 12px; }
+        * {
+            box-sizing: border-box;
+        }
+        body {
+            font-family: "Segoe UI", Arial, sans-serif;
+            background-color: #f7f9fc;
+            padding: 30px;
+            margin: 0;
+            color: #333;
+        }
+        h1 {
+            margin-bottom: 10px;
+            color: #2c3e50;
+        }
+        h2 {
+            margin-top: 30px;
+            color: #34495e;
+        }
+        form {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+        label {
+            min-width: 100px;
+            align-self: center;
+        }
+        select, button {
+            padding: 8px 12px;
+            border-radius: 4px;
+            border: 1px solid #ccc;
+            font-size: 14px;
+        }
+        button {
+            background-color: #2ecc71;
+            color: white;
+            border: none;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+        button:hover {
+            background-color: #27ae60;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            background-color: white;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+            margin-top: 10px;
+        }
+        th, td {
+            padding: 12px 16px;
+            border: 1px solid #ddd;
+            text-align: left;
+        }
+        th {
+            background-color: #f1f1f1;
+        }
+        .action-form {
+            margin: 0;
+        }
+        .action-form button {
+            background-color: #e74c3c;
+        }
+        .action-form button:hover {
+            background-color: #c0392b;
+        }
+        @media (max-width: 600px) {
+            form {
+                flex-direction: column;
+            }
+            label {
+                margin-bottom: 5px;
+            }
+        }
     </style>
 </head>
 <body>
-    <h1>Admin: Manage Table Access (<code>pred</code>)</h1>
+    <h1>Admin: Manage Access to <code>pred</code> Table</h1>
 
     <h2>Grant Access</h2>
     <form method="POST" action="/grant">
-        <label>Seller:</label>
-        <select name="seller_id" required>
+        <label for="seller_id">Seller:</label>
+        <select name="seller_id" id="seller_id" required>
             {% for seller in sellers %}
                 <option value="{{ seller['id'] }}">{{ seller['registration_name'] }} ({{ seller['id'] }})</option>
             {% endfor %}
         </select>
 
-        <label>Buyer:</label>
-        <select name="buyer_id" required>
+        <label for="buyer_id">Buyer:</label>
+        <select name="buyer_id" id="buyer_id" required>
             {% for buyer in buyers %}
                 <option value="{{ buyer['id'] }}">{{ buyer['registration_name'] }} ({{ buyer['id'] }})</option>
             {% endfor %}
@@ -62,24 +135,33 @@ template = """
 
     <h2>Current Access Grants</h2>
     <table>
-        <tr><th>Seller</th><th>Buyer</th><th>Action</th></tr>
+        <thead>
+            <tr>
+                <th>Seller</th>
+                <th>Buyer</th>
+                <th>Action</th>
+            </tr>
+        </thead>
+        <tbody>
         {% for access in access_list %}
-        <tr>
-            <td>{{ access['seller_name'] }}</td>
-            <td>{{ access['buyer_name'] }}</td>
-            <td>
-                <form method="POST" action="/revoke">
-                    <input type="hidden" name="seller_id" value="{{ access['seller_id'] }}">
-                    <input type="hidden" name="buyer_id" value="{{ access['buyer_id'] }}">
-                    <button type="submit">Revoke</button>
-                </form>
-            </td>
-        </tr>
+            <tr>
+                <td>{{ access['seller_name'] }}</td>
+                <td>{{ access['buyer_name'] }}</td>
+                <td>
+                    <form class="action-form" method="POST" action="/revoke">
+                        <input type="hidden" name="seller_id" value="{{ access['seller_id'] }}">
+                        <input type="hidden" name="buyer_id" value="{{ access['buyer_id'] }}">
+                        <button type="submit">Revoke</button>
+                    </form>
+                </td>
+            </tr>
         {% endfor %}
+        </tbody>
     </table>
 </body>
 </html>
 """
+
 
 # Helper Functions
 
